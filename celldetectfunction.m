@@ -1,3 +1,10 @@
+% Copyright (c) 2023 Olivier Rukundo
+% Development of a deep learning-based decision support system 
+% for classification of oral dysplasia grades (AutOPathStage) 
+% University Clinic of Dentistry, Medical University of Vienna, Vienna
+% E-mail: olivier.rukundo@meduniwien.ac.at | orukundo@gmail.com
+% Version 1.0  dated 21.08.2023
+
 function [input_color_image, barImage, bar_values, centroids_labels]  = celldetectfunction(input_color_image, unetsegmented_image)
     
     % Convert categorical array to numeric
