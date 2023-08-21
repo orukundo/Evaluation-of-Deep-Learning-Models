@@ -1,0 +1,603 @@
+% Copyright (c) 2023 Olivier Rukundo
+% Development of a deep learning-based decision support system 
+% for classification of oral dysplasia grades (AutOPathStage) 
+% University Clinic of Dentistry, Medical University of Vienna, Vienna
+% E-mail: olivier.rukundo@meduniwien.ac.at | orukundo@gmail.com
+% Version 1.0  dated 21.08.2023
+
+classdef dlevaluator < matlab.apps.AppBase
+
+    % Properties that correspond to app components
+    properties (Access = public)
+        DLEVALUATORUIFigure      matlab.ui.Figure
+        IMAGEMenu                matlab.ui.container.Menu
+        MASKMenu                 matlab.ui.container.Menu
+        ListLoadedMasksListBox   matlab.ui.control.ListBox
+        TabGroup                 matlab.ui.container.TabGroup
+        DETECTIONTab             matlab.ui.container.Tab
+        ExportCSVButton          matlab.ui.control.Button
+        ExportImageButton        matlab.ui.control.Button
+        UIAxes2                  matlab.ui.control.UIAxes
+        UIAxes                   matlab.ui.control.UIAxes
+        EVALUATIONTab            matlab.ui.container.Tab
+        ClearButton              matlab.ui.control.Button
+        CompareButton            matlab.ui.control.Button
+        UIAxes2_3                matlab.ui.control.UIAxes
+        UIAxes2_2                matlab.ui.control.UIAxes
+        UIAxes_2                 matlab.ui.control.UIAxes
+        ListLoadedImagesListBox  matlab.ui.control.ListBox
+    end
+
+    properties (Access = private)
+        selected_mask = [];            % Selected Ground truth image or mask
+        output_color_image = [];       % Output color image after analysis
+        centroids_labels_color = [];   % Detected centroids (Color Image)
+        centroids_labels_gray = [];    % Detected centroids (Grayscale Image)
+        net = [];                      % Loaded deep learning model
+    end
+
+    methods (Access = private)
+
+        function loadModel(app)
+            % This function loads a pre-trained model. It first checks a hardcoded path for the model.
+            % If not found, it prompts the user to select a model file.
+            modelPath = 'C:\Users\...\trained_model.mat';
+            if ~exist(modelPath, 'file')
+                [file, path] = uigetfile('*.mat', 'SELECT THE PRE-TRAINED MODEL FILE');
+                if isequal(file, 0)
+                    error('User did not select a model file. Exiting...');
+                else
+                    modelPath = fullfile(path, file);
+                end
+            end
+            loadedModel = load(modelPath);
+            if isfield(loadedModel, 'net')
+                app.net = loadedModel.net;
+            else
+                error('The loaded .mat file does not contain a "net" variable.');
+            end
+        end
+    end
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Code that executes after component creation
+        function startupFcn(app)
+            loadModel(app);
+        end
+
+        % Value changed function: ListLoadedImagesListBox
+        function ListLoadedImagesListBoxValueChanged(app, event)
+        selectedImage = "";         %#ok
+        imageDir = "";              %#ok
+        input_color_image = [];     %#ok
+        unetsegmented_image = [];   %#ok
+        barImage = [];              %#ok
+
+        % Initialization
+        selectedImage = app.ListLoadedImagesListBox.Value;
+        imageDir = app.ListLoadedImagesListBox.UserData;
+
+        % Read or load and display the selected image
+        input_color_image = imread(fullfile(imageDir, selectedImage));
+
+        % Perform semantic segmentation using the pre-trained U-Net model
+        unetsegmented_image = semanticseg(input_color_image, app.net);
+
+        % Call celldetectfunction to detect cells.
+        [app.output_color_image, barImage, bar_values, app.centroids_labels_color] = celldetectfunction(input_color_image, unetsegmented_image);
+
+        % Display the processed image on UIAxes
+        imshow(app.output_color_image, 'Parent', app.UIAxes);
+
+        %% The purpose of this section is to add descriptive titles to the output image
+        % This provides context for the types of cells detected or some other relevant information
+        A = {'CELL TYPE 1', 'CELL TYPE 2'};
+        imgHeight = round(0.125*size(barImage, 1));
+        imgWidth = size(barImage, 2);
+        fontSize = 24; 
+
+        % Create a blank image for writing
+        textImg = uint8(255 * ones(imgHeight, imgWidth, 3));
+        barWidth = imgWidth/length(bar_values);
+
+        % Define positions manually
+        positions = [
+            0.5 * barWidth + barWidth/6;
+            1.5 * barWidth - barWidth/6;
+            ];
+
+        % Insert text for each position
+        textImg = insertText(textImg, [positions(1), imgHeight - fontSize], char(A(1)), 'FontSize', fontSize, 'BoxOpacity', 0, 'AnchorPoint', 'CenterBottom');
+        textImg = insertText(textImg, [positions(2), imgHeight - fontSize], char(A(2)), 'FontSize', fontSize, 'BoxOpacity', 0, 'AnchorPoint', 'CenterBottom');
+
+        % Combine the two images (bar image and text description)
+        combinedImg = vertcat(barImage, textImg);
+
+        % Display the combined image on UIAxes2 for visualization
+        imshow(combinedImg, 'Parent', app.UIAxes2);
+    
+        % Adjust the UIAxes display properties for better visualization
+        axis(app.UIAxes, 'image');   
+        axis(app.UIAxes, 'off');     
+        end
+
+        % Menu selected function: IMAGEMenu
+        function IMAGEMenuSelected(app, event)
+        % Default directory
+        defaultImgDir = 'C:\Users\...';
+
+        % Check if the default directory exists
+        if ~exist(defaultImgDir, 'dir')
+            % Prompt the user for directory selection
+            imageDir = uigetdir('', 'Select Image Folder');
+        else
+            imageDir = defaultImgDir;
+        end
+
+        % This will bring the UIFigure to the front.
+        figure(app.DLEVALUATORUIFigure);
+
+        if imageDir == 0
+            % User cancelled folder selection
+            return
+        end
+
+        % List of extensions
+        extensions = {'.jpg', '.png', '.bmp', '.tif', '.tiff', '.jpeg'};
+
+        % Initialize an empty array to store the imageFiles
+        imageFiles = [];
+
+        % Get all image files in this directory
+        for i = 1:length(extensions)
+            imageFiles = [imageFiles; dir(fullfile(imageDir, ['*', extensions{i}]))];  %#ok
+        end
+
+        % Update ListLoadedImagesListBox
+        app.ListLoadedImagesListBox.Items = {imageFiles.name};
+
+        % Store the image directory for later use
+        app.ListLoadedImagesListBox.UserData = imageDir;
+
+        % If the directory has images, set the value to the first image and call the value changed function
+        if ~isempty(imageFiles)
+            app.ListLoadedImagesListBox.Value = imageFiles(1).name;
+            ListLoadedImagesListBoxValueChanged(app, []);
+        end
+        end
+
+        % Menu selected function: MASKMenu
+        function MASKMenuSelected(app, event)
+        % Set the default directory path
+        defaultMaskDir = 'C:\Users\...';
+
+        % Check the existence of the default directory. If default directory doesn't exist, prompt user to select a directory
+        if ~exist(defaultMaskDir, 'dir')
+            maskDir = uigetdir('', 'Select Mask Folder');
+        else
+            maskDir = defaultMaskDir;
+        end
+
+        % Bring the UIFigure to the forefront
+        figure(app.DLEVALUATORUIFigure);
+
+        % Exit if user cancels the folder selection
+        if maskDir == 0
+            return
+        end
+
+        % Define the list of valid image extensions
+        extensions = {'.jpg', '.png', '.bmp', '.tif', '.tiff', '.jpeg'};
+
+        % Initialize array to hold image file details
+        maskFiles = [];
+
+        % Populate maskFiles with details of images present in the selected directory
+        for i = 1:length(extensions)
+            maskFiles = [maskFiles; dir(fullfile(maskDir, ['*', extensions{i}]))];  %#ok
+        end
+
+        % Update the ListBox with the names of the loaded mask images
+        app.ListLoadedMasksListBox.Items = {maskFiles.name};
+
+        % Store the directory path for later retrieval
+        app.ListLoadedMasksListBox.UserData = maskDir;
+
+        % If images are present, set the default selected image to the first one and trigger its value changed function
+        if ~isempty(maskFiles)
+            app.ListLoadedMasksListBox.Value = maskFiles(1).name;
+            ListLoadedMasksListBoxValueChanged(app, []);
+        end
+        end
+
+        % Value changed function: ListLoadedMasksListBox
+        function ListLoadedMasksListBoxValueChanged(app, event)
+        selectedMask = app.ListLoadedMasksListBox.Value;
+        maskDir = app.ListLoadedMasksListBox.UserData;
+
+        % Load and display mask
+        ground_truth_mask = imread(fullfile(maskDir, selectedMask));
+        
+        % Update the app property with the loaded mask image
+        app.selected_mask = ground_truth_mask;  
+
+        % Display the mask on UIAxes_2
+        imshow(ground_truth_mask, 'Parent', app.UIAxes_2);
+
+        % Call the testdetectfunction to detect cells
+        [~, barImageGT, bar_values, app.centroids_labels_gray] = cellevalufunction(ground_truth_mask);
+   
+        %% The purpose of this section is to add descriptive titles to the bar mask
+        % This provides context for the types of cells detected or some other relevant information
+        A = {'CELL TYPE 1', 'CELL TYPE 2'};
+        imgHeight = round(0.125*size(barImageGT, 1));
+        imgWidth = size(barImageGT, 2);
+        fontSize = 24; 
+
+       % Create a blank canvas for text insertion
+        textImg = uint8(255 * ones(imgHeight, imgWidth, 3));
+        barWidth = imgWidth/length(bar_values);
+
+        % Manually define positions for text insertion
+        positions = [
+            0.5 * barWidth + barWidth/6;
+            1.5 * barWidth - barWidth/6;
+            ];
+
+        % Insert text for each position
+        textImg = insertText(textImg, [positions(1), imgHeight - fontSize], char(A(1)), 'FontSize', fontSize, 'BoxOpacity', 0, 'AnchorPoint', 'CenterBottom');
+        textImg = insertText(textImg, [positions(2), imgHeight - fontSize], char(A(2)), 'FontSize', fontSize, 'BoxOpacity', 0, 'AnchorPoint', 'CenterBottom');
+
+        % Combine the two images (bar mask and text description)
+        combinedImgGT = vertcat(barImageGT, textImg);
+
+        % Display the combined image on UIAxes2_2
+        imshow(combinedImgGT, 'Parent', app.UIAxes2_2);
+        
+        % Adjust the UIAxes_2 display properties for better visualization
+        axis(app.UIAxes_2, 'image');   
+        axis(app.UIAxes_2, 'off');     
+        end
+
+        % Button pushed function: CompareButton
+        function CompareButtonPushed(app, event)
+            % Check if both images are loaded. If not, display an error message.
+            if isempty(app.selected_mask) || isempty(app.output_color_image)
+                uialert(app.DLEVALUATORUIFigure, 'Please ensure both images are loaded before comparison.', 'Error');
+                return;
+            end
+
+            % Display the difference between the ground truth and Unet segmented images on UIAxes_2
+            imshowpair(app.selected_mask, app.output_color_image, 'falsecolor', 'Parent', app.UIAxes_2);
+
+            % Extract centroids based on the pixel values (128 and 255) from Unet segmented masks (app.centroids_labels_color)
+            rows_color_128 = app.centroids_labels_color(:,3) == 128;
+            x_c_128 = app.centroids_labels_color(rows_color_128, 1);
+            y_c_128 = app.centroids_labels_color(rows_color_128, 2);
+            rows_color_255 = app.centroids_labels_color(:,3) == 255;
+            x_c_255 = app.centroids_labels_color(rows_color_255, 1);
+            y_c_255 = app.centroids_labels_color(rows_color_255, 2);
+
+            % Ensure the gray image centroids array has enough columns before processing.
+            if size(app.centroids_labels_gray, 2) >= 3
+                % Extract centroids based on the pixel values (128 and 255) for gray images.
+                rows_gray_128 = app.centroids_labels_gray(:,3) == 128;
+                x_g_128 = app.centroids_labels_gray(rows_gray_128, 1);
+                y_g_128 = app.centroids_labels_gray(rows_gray_128, 2);
+                rows_gray_255 = app.centroids_labels_gray(:,3) == 255;
+                x_g_255 = app.centroids_labels_gray(rows_gray_255, 1);
+                y_g_255 = app.centroids_labels_gray(rows_gray_255, 2);
+
+                %% Compare coordinates of color and gray images for 128 and 255 values
+                % to calculate TP (True Positives), FP (False Positives), and FN (False Negatives).
+
+                % Handling centroids with pixel value 128
+                min_length_128 = min(length(x_c_128), length(x_g_128));
+                TP_128 = 0; FP_128 = 0; FN_128 = 0;
+                for i = 1:min_length_128
+                    distance_128 = sqrt((x_c_128(i) - x_g_128(i))^2 + (y_c_128(i) - y_g_128(i))^2);
+                    % If distance is within 15 pixels, consider as a match, else a mismatch.
+                    if distance_128 <= 15
+                        TP_128 = TP_128 + 1;
+                    else
+                        FP_128 = FP_128 + 1;
+                    end
+                end
+                FN_128 = FN_128 + abs(length(x_c_128) - length(x_g_128));
+
+                % Handling centroids with pixel value 255
+                min_length_255 = min(length(x_c_255), length(x_g_255));
+                TP_255 = 0; FP_255 = 0; FN_255 = 0;
+
+                for i = 1:min_length_255
+                    distance_255 = sqrt((x_c_255(i) - x_g_255(i))^2 + (y_c_255(i) - y_g_255(i))^2);
+                    if distance_255 <= 15
+                        TP_255 = TP_255 + 1;
+                    else
+                        FP_255 = FP_255 + 1;
+                    end
+                end
+                FN_255 = FN_255 + abs(length(x_c_255) - length(x_g_255));
+
+                %% Visualizing the comparison results using a bar chart
+                % Each bar represents TP, FP, or FN for either 128 or 255 value.
+
+                % Initialize the bar chart with custom positions and colors
+                figure('Visible', 'off', 'Units', 'pixels', 'Position', [100, 100, 600, 400]); % Increased height
+                bar_values = [TP_128, FP_128, FN_128, TP_255, FP_255, FN_255];
+                bars = bar(1:6, bar_values);
+
+                % Assign colors based on bar values.
+                if length(bars) == 1
+                    set(bars, 'FaceColor', 'flat');
+                    set(bars, 'CData', [1 1 0; 1 1 0; 1 0 0; 0 0 1; 0 0 1; 1 0 0]); % Yellow for the first bar, Blue for the second, etc.
+                else
+                    set(bars(1), 'FaceColor', 'yellow');
+                    set(bars(2), 'FaceColor', 'yellow');
+                    set(bars(3), 'FaceColor', 'red');
+                    set(bars(4), 'FaceColor', 'blue');
+                    set(bars(5), 'FaceColor', 'blue');
+                    set(bars(6), 'FaceColor', 'red');
+                end
+                ylim([0 max(bar_values) + 30]);
+
+                for idx = 1:length(bar_values)
+                    text(idx, bar_values(idx) + 2, [num2str(bar_values(idx))], 'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom');
+                end
+
+                % Capture the chart and close the temporary figure
+                frame = getframe(gca);
+                CompBarImage = frame2im(frame);
+                close;
+
+                % Write the titles onto the image
+                A = {'TP', 'FP', 'FN', 'TP', 'FP', 'FN'};
+                imgHeight = round(0.125*size(CompBarImage, 1));
+                imgWidth = size(CompBarImage, 2);
+                fontSize = 24; % or whatever is suitable
+
+                % Create a blank image for writing
+                textImg = uint8(255 * ones(imgHeight, imgWidth, 3));
+                barWidth = imgWidth/length(bar_values);
+
+                % Define positions manually
+                positions = [
+                    0.5 * barWidth + barWidth/2;
+                    1.5 * barWidth + barWidth/3;
+                    2.5 * barWidth + barWidth/7;
+                    3.5 * barWidth - barWidth/17;
+                    4.5 * barWidth - barWidth/3.5;
+                    5.5 * barWidth - barWidth/2.5
+                    ];
+
+                % Insert text for each position
+                textImg = insertText(textImg, [positions(1), imgHeight - fontSize], char(A(1)), 'FontSize', fontSize, 'BoxOpacity', 0, 'AnchorPoint', 'CenterBottom');
+                textImg = insertText(textImg, [positions(2), imgHeight - fontSize], char(A(2)), 'FontSize', fontSize, 'BoxOpacity', 0, 'AnchorPoint', 'CenterBottom');
+                textImg = insertText(textImg, [positions(3), imgHeight - fontSize], char(A(3)), 'FontSize', fontSize, 'BoxOpacity', 0, 'AnchorPoint', 'CenterBottom');
+                textImg = insertText(textImg, [positions(4), imgHeight - fontSize], char(A(4)), 'FontSize', fontSize, 'BoxOpacity', 0, 'AnchorPoint', 'CenterBottom');
+                textImg = insertText(textImg, [positions(5), imgHeight - fontSize], char(A(5)), 'FontSize', fontSize, 'BoxOpacity', 0, 'AnchorPoint', 'CenterBottom');
+                textImg = insertText(textImg, [positions(6), imgHeight - fontSize], char(A(6)), 'FontSize', fontSize, 'BoxOpacity', 0, 'AnchorPoint', 'CenterBottom');
+
+                % Combine the two images(bar image and text description)
+                combinedImg = vertcat(CompBarImage, textImg);
+
+                % Display the ground truth mask on the specified UIaxes
+                imshow(combinedImg, 'Parent', app.UIAxes2_3);
+            else
+                % If centroids_labels_gray does not contain the expected number of columns, log a warning.
+                disp('Warning: centroids_labels_gray does not have 3 columns.');
+            end
+        end
+
+        % Button pushed function: ClearButton
+        function ClearButtonPushed(app, event)
+            % Ensure that the required output image is loaded and available in the app
+            % Show an alert if the output image isn't available
+            if isempty(app.output_color_image)
+                uialert(app.DLEVALUATORUIFigure, 'Output image is not available.', 'Error');
+                return;
+            end
+            
+            % Retrieve the selected mask name and its directory from the UI
+            selectedMask = app.ListLoadedMasksListBox.Value;
+            maskDir = app.ListLoadedMasksListBox.UserData;
+
+            % Load the selected mask image
+            ground_truth_mask = imread(fullfile(maskDir, selectedMask));
+
+            % Display the ground truth mask on the specified UIaxes
+            imshow(ground_truth_mask, 'Parent', app.UIAxes_2); 
+            
+            % Create a temporary invisible figure for capturing the bar chart image
+            % This is necessary because the bar chart may not be directly obtainable as an image
+            figure('Visible', 'off'); 
+            frame = getframe(gca);           % Capture the current axis' frame
+            CompBarImage = frame2im(frame);  % Convert the frame to an image
+            
+            % Close the temporary invisible figure now that the bar chart image has been captured
+            close; 
+            
+            % Display the captured bar chart image on the designated axes
+            imshow(CompBarImage, 'Parent', app.UIAxes2_3);
+            
+            % Adjust the display properties of UIAxes_2 for better visualization
+            axis(app.UIAxes_2, 'image');   % Adjust the aspect ratio
+            axis(app.UIAxes_2, 'off');     % Hide axis tick marks and labels.
+
+        end
+
+        % Button pushed function: ExportImageButton
+        function ExportImageButtonPushed(app, event)
+            % Prompt the user to select a directory
+            folderName = uigetdir;
+            if folderName == 0
+                % User pressed cancel or closed the prompt
+                return;
+            end
+
+            % Create a file path for the PNG image
+            imagePath = fullfile(folderName, 'output_image.png');
+            imwrite(app.output_color_image, imagePath);
+            msgbox('Image exported successfully!', 'Success');
+        end
+
+        % Button pushed function: ExportCSVButton
+        function ExportCSVButtonPushed(app, event)
+            % Prompt the user to select a directory
+            folderName = uigetdir;
+            if folderName == 0
+                % User pressed cancel or closed the prompt
+                return;
+            end
+
+            % Convert the matrix to a table with column names
+            T = array2table(round(app.centroids_labels_color), 'VariableNames', {'X', 'Y', 'Label'});
+
+            % Create a file path for the CSV file
+            csvPath = fullfile(folderName, 'centroids_data.csv');
+
+            % Write the table to the CSV file using semicolon as delimiter
+            writetable(T, csvPath, 'Delimiter', ';');
+            msgbox('CSV exported successfully!', 'Success');
+        end
+    end
+
+    % Component initialization
+    methods (Access = private)
+
+        % Create UIFigure and components
+        function createComponents(app)
+
+            % Get the file path for locating images
+            pathToMLAPP = fileparts(mfilename('fullpath'));
+
+            % Create DLEVALUATORUIFigure and hide until all components are created
+            app.DLEVALUATORUIFigure = uifigure('Visible', 'off');
+            app.DLEVALUATORUIFigure.Color = [0.149 0.149 0.149];
+            app.DLEVALUATORUIFigure.Position = [100 100 1525 1031];
+            app.DLEVALUATORUIFigure.Name = 'DL-EVALUATOR';
+            app.DLEVALUATORUIFigure.Icon = fullfile(pathToMLAPP, 'IntroIconV1.png');
+            app.DLEVALUATORUIFigure.WindowState = 'fullscreen';
+
+            % Create IMAGEMenu
+            app.IMAGEMenu = uimenu(app.DLEVALUATORUIFigure);
+            app.IMAGEMenu.MenuSelectedFcn = createCallbackFcn(app, @IMAGEMenuSelected, true);
+            app.IMAGEMenu.Text = '             IMAGE           ';
+
+            % Create MASKMenu
+            app.MASKMenu = uimenu(app.DLEVALUATORUIFigure);
+            app.MASKMenu.MenuSelectedFcn = createCallbackFcn(app, @MASKMenuSelected, true);
+            app.MASKMenu.Text = '             MASK            ';
+
+            % Create ListLoadedImagesListBox
+            app.ListLoadedImagesListBox = uilistbox(app.DLEVALUATORUIFigure);
+            app.ListLoadedImagesListBox.ValueChangedFcn = createCallbackFcn(app, @ListLoadedImagesListBoxValueChanged, true);
+            app.ListLoadedImagesListBox.Position = [9 21 113 1003];
+
+            % Create TabGroup
+            app.TabGroup = uitabgroup(app.DLEVALUATORUIFigure);
+            app.TabGroup.Position = [253 21 1263 1003];
+
+            % Create DETECTIONTab
+            app.DETECTIONTab = uitab(app.TabGroup);
+            app.DETECTIONTab.Title = 'DETECTION';
+
+            % Create UIAxes
+            app.UIAxes = uiaxes(app.DETECTIONTab);
+            app.UIAxes.XColor = [0 0.4471 0.7412];
+            app.UIAxes.XTick = [0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1];
+            app.UIAxes.YColor = [0 0.4471 0.7412];
+            app.UIAxes.Position = [17 21 889 911];
+
+            % Create UIAxes2
+            app.UIAxes2 = uiaxes(app.DETECTIONTab);
+            zlabel(app.UIAxes2, 'Z')
+            app.UIAxes2.XTick = [0 0.2 0.4 0.6 0.8 1];
+            app.UIAxes2.XTickLabel = {'0'; '0.2'; '0.4'; '0.6'; '0.8'; '1'};
+            app.UIAxes2.Position = [932 583 290 326];
+
+            % Create ExportImageButton
+            app.ExportImageButton = uibutton(app.DETECTIONTab, 'push');
+            app.ExportImageButton.ButtonPushedFcn = createCallbackFcn(app, @ExportImageButtonPushed, true);
+            app.ExportImageButton.Position = [975 941 93 23];
+            app.ExportImageButton.Text = 'Export Image';
+
+            % Create ExportCSVButton
+            app.ExportCSVButton = uibutton(app.DETECTIONTab, 'push');
+            app.ExportCSVButton.ButtonPushedFcn = createCallbackFcn(app, @ExportCSVButtonPushed, true);
+            app.ExportCSVButton.Position = [1134 940 78 23];
+            app.ExportCSVButton.Text = 'Export CSV';
+
+            % Create EVALUATIONTab
+            app.EVALUATIONTab = uitab(app.TabGroup);
+            app.EVALUATIONTab.Title = ' EVALUATION';
+
+            % Create UIAxes_2
+            app.UIAxes_2 = uiaxes(app.EVALUATIONTab);
+            app.UIAxes_2.XColor = [0 0.4471 0.7412];
+            app.UIAxes_2.XTick = [0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1];
+            app.UIAxes_2.YColor = [0 0.4471 0.7412];
+            app.UIAxes_2.Position = [18 21 888 911];
+
+            % Create UIAxes2_2
+            app.UIAxes2_2 = uiaxes(app.EVALUATIONTab);
+            zlabel(app.UIAxes2_2, 'Z')
+            app.UIAxes2_2.Position = [931 575 299 357];
+
+            % Create UIAxes2_3
+            app.UIAxes2_3 = uiaxes(app.EVALUATIONTab);
+            zlabel(app.UIAxes2_3, 'Z')
+            app.UIAxes2_3.Position = [931 182 299 357];
+
+            % Create CompareButton
+            app.CompareButton = uibutton(app.EVALUATIONTab, 'push');
+            app.CompareButton.ButtonPushedFcn = createCallbackFcn(app, @CompareButtonPushed, true);
+            app.CompareButton.Position = [969 946 100 23];
+            app.CompareButton.Text = 'Compare';
+
+            % Create ClearButton
+            app.ClearButton = uibutton(app.EVALUATIONTab, 'push');
+            app.ClearButton.ButtonPushedFcn = createCallbackFcn(app, @ClearButtonPushed, true);
+            app.ClearButton.Position = [1122 946 100 23];
+            app.ClearButton.Text = 'Clear';
+
+            % Create ListLoadedMasksListBox
+            app.ListLoadedMasksListBox = uilistbox(app.DLEVALUATORUIFigure);
+            app.ListLoadedMasksListBox.ValueChangedFcn = createCallbackFcn(app, @ListLoadedMasksListBoxValueChanged, true);
+            app.ListLoadedMasksListBox.Position = [129 21 113 1003];
+
+            % Show the figure after all components are created
+            app.DLEVALUATORUIFigure.Visible = 'on';
+        end
+    end
+
+    % App creation and deletion
+    methods (Access = public)
+
+        % Construct app
+        function app = dlevaluator
+
+            % Create UIFigure and components
+            createComponents(app)
+
+            % Register the app with App Designer
+            registerApp(app, app.DLEVALUATORUIFigure)
+
+            % Execute the startup function
+            runStartupFcn(app, @startupFcn)
+
+            if nargout == 0
+                clear app
+            end
+        end
+
+        % Code that executes before app deletion
+        function delete(app)
+
+            % Delete UIFigure when app is deleted
+            delete(app.DLEVALUATORUIFigure)
+        end
+    end
+end
