@@ -64,7 +64,7 @@ classdef dlevaluator < matlab.apps.AppBase
 
         %% The purpose of this section is to add descriptive titles to the output image
         % This provides context for the types of cells detected or some other relevant information
-        A = {'CELL TYPE 1', 'CELL TYPE 2'};
+        A = {'CELL 1', 'CELL 2'};
         imgHeight = round(0.125*size(barImage, 1));
         imgWidth = size(barImage, 2);
         fontSize = 24; 
@@ -212,7 +212,7 @@ classdef dlevaluator < matlab.apps.AppBase
    
         %% The purpose of this section is to add descriptive titles to the bar mask
         % This provides context for the types of cells detected or some other relevant information
-        A = {'CELL TYPE 1', 'CELL TYPE 2'};
+        A = {'CELL 1', 'CELL 2'};
         imgHeight = round(0.125*size(barImageGT, 1));
         imgWidth = size(barImageGT, 2);
         fontSize = 24; 
