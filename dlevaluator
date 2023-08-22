@@ -10,6 +10,7 @@ classdef dlevaluator < matlab.apps.AppBase
         DLEVALUATORUIFigure      matlab.ui.Figure
         IMAGEMenu                matlab.ui.container.Menu
         MASKMenu                 matlab.ui.container.Menu
+        MODELMenu                matlab.ui.container.Menu
         ListLoadedMasksListBox   matlab.ui.control.ListBox
         TabGroup                 matlab.ui.container.TabGroup
         DETECTIONTab             matlab.ui.container.Tab
@@ -34,36 +35,8 @@ classdef dlevaluator < matlab.apps.AppBase
         net = [];                      % Loaded deep learning model
     end
 
-    methods (Access = private)
-
-        function loadModel(app)
-            % This function loads a pre-trained model. It first checks a hardcoded path for the model.
-            % If not found, it prompts the user to select a model file.
-            modelPath = 'C:\Users\...\trained_model.mat';
-            if ~exist(modelPath, 'file')
-                [file, path] = uigetfile('*.mat', 'SELECT THE PRE-TRAINED MODEL FILE');
-                if isequal(file, 0)
-                    error('User did not select a model file. Exiting...');
-                else
-                    modelPath = fullfile(path, file);
-                end
-            end
-            loadedModel = load(modelPath);
-            if isfield(loadedModel, 'net')
-                app.net = loadedModel.net;
-            else
-                error('The loaded .mat file does not contain a "net" variable.');
-            end
-        end
-    end
-
     % Callbacks that handle component events
     methods (Access = private)
-
-        % Code that executes after component creation
-        function startupFcn(app)
-            loadModel(app);
-        end
 
         % Value changed function: ListLoadedImagesListBox
         function ListLoadedImagesListBoxValueChanged(app, event)
@@ -124,7 +97,7 @@ classdef dlevaluator < matlab.apps.AppBase
         % Menu selected function: IMAGEMenu
         function IMAGEMenuSelected(app, event)
         % Default directory
-        defaultImgDir = 'C:\Users\...';
+        defaultImgDir = '';
 
         % Check if the default directory exists
         if ~exist(defaultImgDir, 'dir')
@@ -148,9 +121,16 @@ classdef dlevaluator < matlab.apps.AppBase
         % Initialize an empty array to store the imageFiles
         imageFiles = [];
 
+        % Create a waitbar
+        h = waitbar(0, 'LOADING IMAGES...', 'Name', 'Progress');
+
         % Get all image files in this directory
         for i = 1:length(extensions)
-            imageFiles = [imageFiles; dir(fullfile(imageDir, ['*', extensions{i}]))];  %#ok
+            tempFiles = dir(fullfile(imageDir, ['*', extensions{i}]));
+            imageFiles = [imageFiles; tempFiles];  %#ok
+
+            % Update the waitbar
+            waitbar(i / length(extensions), h, sprintf('LOADING %s IMAGES...', extensions{i}));
         end
 
         % Update ListLoadedImagesListBox
@@ -164,12 +144,15 @@ classdef dlevaluator < matlab.apps.AppBase
             app.ListLoadedImagesListBox.Value = imageFiles(1).name;
             ListLoadedImagesListBoxValueChanged(app, []);
         end
+
+        % Close the waitbar
+        close(h);
         end
 
         % Menu selected function: MASKMenu
         function MASKMenuSelected(app, event)
         % Set the default directory path
-        defaultMaskDir = 'C:\Users\...';
+        defaultMaskDir = '';
 
         % Check the existence of the default directory. If default directory doesn't exist, prompt user to select a directory
         if ~exist(defaultMaskDir, 'dir')
@@ -350,7 +333,7 @@ classdef dlevaluator < matlab.apps.AppBase
                 CompBarImage = frame2im(frame);
                 close;
 
-                % Write the titles onto the image
+                % Now, write the titles onto the image
                 A = {'TP', 'FP', 'FN', 'TP', 'FP', 'FN'};
                 imgHeight = round(0.125*size(CompBarImage, 1));
                 imgWidth = size(CompBarImage, 2);
@@ -438,7 +421,7 @@ classdef dlevaluator < matlab.apps.AppBase
             % Create a file path for the PNG image
             imagePath = fullfile(folderName, 'output_image.png');
             imwrite(app.output_color_image, imagePath);
-            msgbox('Image exported successfully!', 'Success');
+            msgbox('IMAGE EXPORTED SUCCESSFULLY!', 'Success');
         end
 
         % Button pushed function: ExportCSVButton
@@ -458,7 +441,32 @@ classdef dlevaluator < matlab.apps.AppBase
 
             % Write the table to the CSV file using semicolon as delimiter
             writetable(T, csvPath, 'Delimiter', ';');
-            msgbox('CSV exported successfully!', 'Success');
+            msgbox('CSV EXPORTED SUCCESSFULLY!', 'Success');
+        end
+
+        % Menu selected function: MODELMenu
+        function MODELMenuSelected(app, event)
+            % This function loads a pre-trained model. It first checks a hardcoded path for the model.
+            % If not found, it prompts the user to select a model file.
+            modelPath = '';
+            if ~exist(modelPath, 'file')
+                [file, path] = uigetfile('*.mat', '');
+                if isequal(file, 0)
+                    error('User did not select a model file. Exiting...');
+                else
+                    modelPath = fullfile(path, file);
+                end
+            end
+            loadedModel = load(modelPath);
+            if isfield(loadedModel, 'net')
+                app.net = loadedModel.net;
+
+                % Display a message box to notify the user
+                msgbox('MODEL LOADED SUCCESSFULLY!', 'Success', 'help');
+
+            else
+                error('The loaded .mat file does not contain a "net" variable.');
+            end
         end
     end
 
@@ -476,7 +484,7 @@ classdef dlevaluator < matlab.apps.AppBase
             app.DLEVALUATORUIFigure.Color = [0.149 0.149 0.149];
             app.DLEVALUATORUIFigure.Position = [100 100 1525 1031];
             app.DLEVALUATORUIFigure.Name = 'DL-EVALUATOR';
-            app.DLEVALUATORUIFigure.Icon = fullfile(pathToMLAPP, 'IntroIconV1.png');
+            app.DLEVALUATORUIFigure.Icon = fullfile(pathToMLAPP, 'MainIcon.png');
             app.DLEVALUATORUIFigure.WindowState = 'fullscreen';
 
             % Create IMAGEMenu
@@ -488,6 +496,11 @@ classdef dlevaluator < matlab.apps.AppBase
             app.MASKMenu = uimenu(app.DLEVALUATORUIFigure);
             app.MASKMenu.MenuSelectedFcn = createCallbackFcn(app, @MASKMenuSelected, true);
             app.MASKMenu.Text = '             MASK            ';
+
+            % Create MODELMenu
+            app.MODELMenu = uimenu(app.DLEVALUATORUIFigure);
+            app.MODELMenu.MenuSelectedFcn = createCallbackFcn(app, @MODELMenuSelected, true);
+            app.MODELMenu.Text = '          MODEL       ';
 
             % Create ListLoadedImagesListBox
             app.ListLoadedImagesListBox = uilistbox(app.DLEVALUATORUIFigure);
@@ -582,9 +595,6 @@ classdef dlevaluator < matlab.apps.AppBase
 
             % Register the app with App Designer
             registerApp(app, app.DLEVALUATORUIFigure)
-
-            % Execute the startup function
-            runStartupFcn(app, @startupFcn)
 
             if nargout == 0
                 clear app
